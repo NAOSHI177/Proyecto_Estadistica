@@ -21,7 +21,6 @@ import pandas as pd
 import seaborn as sns
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from tkinter.scrolledtext import ScrolledText
 
 
 MIN_DATA_POINTS = 10
@@ -237,9 +236,64 @@ class EstadisticaGUI:
         frame_resultados = ttk.LabelFrame(self.root, text="Resultados")
         frame_resultados.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
-        self._texto_resultados = ScrolledText(frame_resultados, height=15)
-        self._texto_resultados.pack(fill="both", expand=True, padx=10, pady=5)
-        self._texto_resultados.configure(state="disabled")
+        self._resultado_vars: dict[str, tk.StringVar] = {}
+        self._resultado_listas: dict[str, ttk.Treeview] = {}
+        self._crear_frames_resultados(frame_resultados)
+
+    def _crear_frames_resultados(self, contenedor: ttk.LabelFrame) -> None:
+        frame_medidas = ttk.Frame(contenedor)
+        frame_medidas.pack(fill="x", padx=10, pady=5)
+
+        info_escalar = [
+            ("media", "Media"),
+            ("mediana", "Mediana"),
+            ("moda", "Moda"),
+            ("percentil_90", "Percentil 90"),
+            ("rango", "Rango"),
+            ("varianza", "Varianza"),
+            ("desv_tipica", "Desviación típica"),
+            ("desv_media", "Desviación media"),
+            ("coef_var", "Coeficiente de variación"),
+        ]
+
+        columnas = 3
+        for col in range(columnas):
+            frame_medidas.columnconfigure(col, weight=1)
+
+        for idx, (clave, titulo) in enumerate(info_escalar):
+            frame = ttk.LabelFrame(frame_medidas, text=titulo)
+            frame.grid(row=idx // columnas, column=idx % columnas, padx=5, pady=5, sticky="nsew")
+
+            variable = tk.StringVar(value="Sin calcular")
+            ttk.Label(frame, textvariable=variable, anchor="w").pack(fill="x", padx=5, pady=5)
+            self._resultado_vars[clave] = variable
+
+        frame_listas = ttk.Frame(contenedor)
+        frame_listas.pack(fill="both", expand=True, padx=10, pady=5)
+
+        info_listas = [
+            ("cuartiles", "Cuartiles"),
+            ("deciles", "Deciles"),
+            ("percentiles", "Percentiles (cada 10%)"),
+        ]
+
+        for clave, titulo in info_listas:
+            frame = ttk.LabelFrame(frame_listas, text=titulo)
+            frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+            tree = ttk.Treeview(frame, columns=("cuantil", "valor"), show="headings", height=4)
+            tree.heading("cuantil", text="Cuantil")
+            tree.heading("valor", text="Valor")
+            tree.column("cuantil", anchor="center", width=130)
+            tree.column("valor", anchor="center", width=130)
+
+            scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=scrollbar.set)
+
+            tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+            scrollbar.pack(side="right", fill="y")
+
+            self._resultado_listas[clave] = tree
 
     def _procesar_datos_manual(self) -> None:
         try:
@@ -324,11 +378,42 @@ class EstadisticaGUI:
             return
 
         medidas = calcular_medidas(self.series)
-        texto = formatear_medidas(medidas)
-        self._texto_resultados.configure(state="normal")
-        self._texto_resultados.delete("1.0", "end")
-        self._texto_resultados.insert("1.0", texto)
-        self._texto_resultados.configure(state="disabled")
+        self._actualizar_frames_resultados(medidas)
+
+    def _actualizar_frames_resultados(self, medidas: dict) -> None:
+        def _formatear_valor(clave: str, valor: float) -> str:
+            if pd.isna(valor):
+                return "No disponible"
+            if clave == "coef_var":
+                return f"{valor:.2f} %"
+            return f"{valor:.4f}"
+
+        for clave, variable in self._resultado_vars.items():
+            valor = medidas.get(clave, np.nan)
+            variable.set(_formatear_valor(clave, valor))
+
+        for clave, tree in self._resultado_listas.items():
+            for item in tree.get_children():
+                tree.delete(item)
+
+            serie = medidas.get(clave)
+            if serie is None:
+                continue
+
+            for cuantil, valor in serie.items():
+                etiqueta = self._formatear_cuantil(clave, cuantil)
+                texto_valor = "No disponible" if pd.isna(valor) else f"{valor:.4f}"
+                tree.insert("", "end", values=(etiqueta, texto_valor))
+
+    @staticmethod
+    def _formatear_cuantil(clave: str, cuantil: float) -> str:
+        if clave == "cuartiles":
+            return f"Q{int(cuantil * 4)} ({cuantil:.2f})"
+        if clave == "deciles":
+            return f"D{int(cuantil * 10)} ({cuantil:.1f})"
+        if clave == "percentiles":
+            return f"P{int(cuantil * 100)} ({cuantil:.0f}%)"
+        return f"{cuantil:.2f}"
 
     def _generar_graficos(self) -> None:
         if self.series is None:
