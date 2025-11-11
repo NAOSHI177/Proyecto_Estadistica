@@ -40,22 +40,6 @@ def _clean_numeric_values(values: Iterable[float]) -> pd.Series:
     return series
 
 
-def cargar_datos_manual() -> pd.Series:
-    """Solicita al usuario ingresar los datos manualmente por consola."""
-    while True:
-        texto = input(
-            f"Ingrese al menos {MIN_DATA_POINTS} datos numéricos separados por espacios:\n> "
-        ).strip()
-        if not texto:
-            print("No se recibieron datos. Intente nuevamente.\n")
-            continue
-        try:
-            valores = [float(x.replace(",", ".")) for x in texto.split()]
-            return _clean_numeric_values(valores)
-        except ValueError as exc:
-            print(f"Error al procesar los datos: {exc}. Intente nuevamente.\n")
-
-
 def parsear_datos_manual(texto: str) -> pd.Series:
     """Convierte una cadena con datos numéricos separados por espacios en serie."""
 
@@ -77,57 +61,6 @@ def _leer_csv(ruta: Path) -> pd.DataFrame:
         return pd.read_csv(ruta)
     except Exception as exc:  # pylint: disable=broad-except
         raise ValueError(f"No se pudo leer el CSV: {exc}") from exc
-
-
-def cargar_datos_csv() -> pd.Series:
-    """Permite seleccionar una columna numérica desde un archivo CSV."""
-    while True:
-        ruta_txt = input("Ingrese la ruta del archivo CSV:\n> ").strip()
-        if not ruta_txt:
-            print("Debe proporcionar una ruta válida.\n")
-            continue
-        ruta = Path(ruta_txt)
-        try:
-            df = _leer_csv(ruta)
-        except (FileNotFoundError, ValueError) as exc:
-            print(f"{exc}\n")
-            continue
-
-        columnas_numericas = df.select_dtypes(include=["number"]).columns
-        if not columnas_numericas.any():
-            print(
-                "El archivo no contiene columnas numéricas. Asegúrese de que exista al menos una columna numérica.\n"
-            )
-            continue
-
-        print("Columnas numéricas disponibles:")
-        for idx, col in enumerate(columnas_numericas, start=1):
-            print(f"  {idx}. {col}")
-        seleccion = input("Seleccione el número de la columna a utilizar:\n> ").strip()
-        if not seleccion.isdigit() or not (1 <= int(seleccion) <= len(columnas_numericas)):
-            print("Selección inválida. Intente nuevamente.\n")
-            continue
-
-        columna = columnas_numericas[int(seleccion) - 1]
-        try:
-            return _clean_numeric_values(df[columna].to_numpy())
-        except ValueError as exc:
-            print(f"{exc}\n")
-
-
-def cargar_datos() -> pd.Series:
-    """Solicita al usuario el modo de carga de datos."""
-    print("=== Ingreso de datos ===")
-    while True:
-        print("Seleccione una opción:")
-        print("  1. Ingresar datos manualmente")
-        print("  2. Cargar datos desde un archivo CSV")
-        opcion = input("> ").strip()
-        if opcion == "1":
-            return cargar_datos_manual()
-        if opcion == "2":
-            return cargar_datos_csv()
-        print("Opción inválida. Intente nuevamente.\n")
 
 
 def calcular_medidas(series: pd.Series) -> dict:
@@ -162,11 +95,6 @@ def calcular_medidas(series: pd.Series) -> dict:
         "desv_media": desv_media,
         "coef_var": coef_var,
     }
-
-
-def mostrar_medidas(medidas: dict) -> None:
-    """Imprime las medidas calculadas en consola."""
-    print(formatear_medidas(medidas))
 
 
 def formatear_medidas(medidas: dict) -> str:
@@ -220,7 +148,6 @@ def formatear_medidas(medidas: dict) -> str:
 
 def generar_graficos(series: pd.Series) -> None:
     """Genera un histograma y un diagrama de dispersión."""
-    print("\nGenerando gráficos... cierre la ventana de gráficos para continuar.")
 
     plt.figure(figsize=(12, 5))
 
@@ -407,6 +334,9 @@ class EstadisticaGUI:
         if self.series is None:
             messagebox.showwarning("Sin datos", "Debe cargar datos antes de generar los gráficos.")
             return
+        self._status_var.set(
+            "Mostrando gráficos. Cierre la ventana de gráficos para continuar con la aplicación."
+        )
         generar_graficos(self.series)
 
 
