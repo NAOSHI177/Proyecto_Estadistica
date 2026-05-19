@@ -1,8 +1,8 @@
-"""Aplicación interactiva de estadística descriptiva.
+"""Aplicación interactiva de estadística descriptiva y regresión lineal simple.
 
 Este módulo permite cargar una serie de datos numéricos ya sea de forma manual o
 mediante un archivo CSV y calcula múltiples medidas estadísticas descriptivas.
-Además genera dos gráficos: un histograma y un diagrama de dispersión.
+Además genera gráficos descriptivos y gráficos de regresión lineal simple.
 
 La aplicación ofrece ahora una interfaz gráfica construida con Tkinter que
 simplifica el flujo de carga, cálculo y visualización de resultados.
@@ -24,7 +24,9 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 
-MIN_DATA_POINTS = 10
+MIN_DATA_POINTS = 20
+EJEMPLO_DESCRIPTIVO = "12 15 18 20 22 24 25 27 29 30 32 35 36 38 40 42 45 47 50 55"
+EJEMPLO_REGRESION = "3 5 7 8 11 13 15 16 19 21 22 25 27 28 31 33 35 36 39 41"
 
 
 def _clean_numeric_values(values: Iterable[float]) -> pd.Series:
@@ -51,6 +53,20 @@ def parsear_datos_manual(texto: str) -> pd.Series:
     except ValueError as exc:  # pragma: no cover - errores de conversión en GUI
         raise ValueError("Los datos ingresados contienen valores no numéricos.") from exc
     return _clean_numeric_values(valores)
+
+
+def parsear_datos_regresion(texto: str) -> pd.Series:
+    """Convierte los datos Y de regresión en una serie numérica."""
+
+    if not texto.strip():
+        raise ValueError("Debe ingresar datos extra de regresión.")
+
+    try:
+        valores = [float(x.replace(",", ".")) for x in texto.split()]
+    except ValueError as exc:  # pragma: no cover - errores de conversión en GUI
+        raise ValueError("Los datos extra de regresión contienen valores no numéricos.") from exc
+
+    return pd.Series(valores, dtype="float64").dropna()
 
 
 def _leer_csv(ruta: Path) -> pd.DataFrame:
@@ -146,6 +162,76 @@ def formatear_medidas(medidas: dict) -> str:
     return "\n".join(lineas)
 
 
+def calcular_regresion_lineal(x: pd.Series, y: pd.Series) -> dict:
+    """Calcula una regresión lineal simple usando NumPy."""
+
+    x_valores = x.astype("float64").to_numpy()
+    y_valores = y.astype("float64").to_numpy()
+
+    if np.allclose(x_valores, x_valores[0]):
+        raise ValueError("No es posible calcular la regresión porque todos los valores de X son iguales.")
+
+    pendiente, intercepto = np.polyfit(x_valores, y_valores, 1)
+    y_pred = pendiente * x_valores + intercepto
+    residuos = y_valores - y_pred
+
+    if np.isclose(np.std(x_valores), 0) or np.isclose(np.std(y_valores), 0):
+        r = np.nan
+    else:
+        r = float(np.corrcoef(x_valores, y_valores)[0, 1])
+
+    ss_res = float(np.sum(residuos**2))
+    ss_tot = float(np.sum((y_valores - np.mean(y_valores)) ** 2))
+    if np.isclose(ss_tot, 0):
+        r2 = 1.0 if np.isclose(ss_res, 0) else np.nan
+    else:
+        r2 = 1 - (ss_res / ss_tot)
+
+    return {
+        "pendiente": float(pendiente),
+        "intercepto": float(intercepto),
+        "ecuacion": f"ŷ = {pendiente:.4f}X + {intercepto:.4f}",
+        "r": r,
+        "r2": float(r2),
+        "y_pred": pd.Series(y_pred),
+        "residuos": pd.Series(residuos),
+        "cantidad": len(x_valores),
+    }
+
+
+def _formatear_numero(valor: float) -> str:
+    """Formatea números y valores no definidos para resultados."""
+
+    return "No definido" if pd.isna(valor) else f"{valor:.4f}"
+
+
+def formatear_regresion(resultado: dict) -> str:
+    """Devuelve una representación textual de la regresión lineal."""
+
+    pendiente = resultado["pendiente"]
+    tendencia = "creciente" if pendiente > 0 else "decreciente" if pendiente < 0 else "constante"
+
+    return "\n".join(
+        [
+            "=== Resultados de regresión lineal ===",
+            "",
+            f"Cantidad de pares analizados: {resultado['cantidad']}",
+            "",
+            "Ecuación de la recta:",
+            resultado["ecuacion"],
+            "",
+            f"Pendiente (m): {_formatear_numero(resultado['pendiente'])}",
+            f"Intercepto (b): {_formatear_numero(resultado['intercepto'])}",
+            f"Coeficiente de correlación de Pearson (r): {_formatear_numero(resultado['r'])}",
+            f"Coeficiente de determinación (R²): {_formatear_numero(resultado['r2'])}",
+            "",
+            "Interpretación:",
+            f"- La relación lineal estimada es {tendencia} porque la pendiente es {pendiente:.4f}.",
+            "- El valor de R² indica qué proporción de la variabilidad de Y es explicada por X mediante el modelo lineal.",
+        ]
+    )
+
+
 def generar_graficos(series: pd.Series) -> None:
     """Genera un histograma y un diagrama de dispersión."""
 
@@ -167,6 +253,38 @@ def generar_graficos(series: pd.Series) -> None:
     plt.show()
 
 
+def generar_graficos_regresion(
+    x: pd.Series, y: pd.Series, y_pred: pd.Series, residuos: pd.Series
+) -> None:
+    """Genera gráficos de dispersión con recta de regresión y residuos."""
+
+    x_valores = x.astype("float64").to_numpy()
+    y_valores = y.astype("float64").to_numpy()
+    y_pred_valores = y_pred.astype("float64").to_numpy()
+    residuos_valores = residuos.astype("float64").to_numpy()
+    orden = np.argsort(x_valores)
+
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    sns.scatterplot(x=x_valores, y=y_valores, color="#009688", label="Datos reales")
+    plt.plot(x_valores[orden], y_pred_valores[orden], color="#d32f2f", label="Recta estimada")
+    plt.title("Dispersión y recta de regresión")
+    plt.xlabel("Variable X")
+    plt.ylabel("Variable Y")
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    sns.scatterplot(x=x_valores, y=residuos_valores, color="#3f51b5")
+    plt.axhline(0, color="#d32f2f", linestyle="--", linewidth=1)
+    plt.title("Residuos de la regresión")
+    plt.xlabel("Variable X")
+    plt.ylabel("Residuos")
+
+    plt.tight_layout()
+    plt.show()
+
+
 def main() -> None:
     """Punto de entrada de la aplicación gráfica."""
 
@@ -180,8 +298,10 @@ class EstadisticaGUI:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Aplicación de Estadística Descriptiva")
+        self.root.title("Aplicación de Estadística Descriptiva y Regresión")
         self.series: Optional[pd.Series] = None
+        self.regresion_y: Optional[pd.Series] = None
+        self.resultado_regresion: Optional[dict] = None
 
         self._status_var = tk.StringVar(value="No hay datos cargados.")
 
@@ -202,11 +322,20 @@ class EstadisticaGUI:
         self._texto_datos = tk.Text(frame_manual, height=4)
         self._texto_datos.pack(fill="x", padx=10, pady=5)
 
+        frame_botones_manual = ttk.Frame(frame_manual)
+        frame_botones_manual.pack(fill="x", padx=10, pady=(0, 10))
+
         ttk.Button(
-            frame_manual,
+            frame_botones_manual,
             text="Utilizar datos ingresados",
             command=self._procesar_datos_manual,
-        ).pack(padx=10, pady=(0, 10))
+        ).pack(side="left", padx=(0, 5))
+
+        ttk.Button(
+            frame_botones_manual,
+            text="Cargar datos de ejemplo",
+            command=self._cargar_ejemplo_descriptivo,
+        ).pack(side="left", padx=5)
 
         frame_csv = ttk.LabelFrame(self.root, text="Datos desde CSV")
         frame_csv.pack(fill="x", padx=10, pady=5)
@@ -234,12 +363,66 @@ class EstadisticaGUI:
             command=self._generar_graficos,
         ).pack(side="left", padx=5)
 
+        frame_regresion = ttk.LabelFrame(self.root, text="Regresión lineal simple")
+        frame_regresion.pack(fill="x", padx=10, pady=5)
+
+        texto_regresion = (
+            "Se usarán los datos ya cargados como variable X. Ingrese a continuación "
+            "los datos correspondientes de la variable Y para calcular la regresión lineal."
+        )
+        ttk.Label(frame_regresion, text=texto_regresion, wraplength=500, justify="left").pack(
+            fill="x", padx=10, pady=(8, 4)
+        )
+
+        ttk.Label(frame_regresion, text="Datos Y adicionales para regresión").pack(
+            anchor="w", padx=10, pady=(4, 0)
+        )
+
+        self._texto_regresion = tk.Text(frame_regresion, height=4)
+        self._texto_regresion.pack(fill="x", padx=10, pady=5)
+
+        frame_botones_regresion = ttk.Frame(frame_regresion)
+        frame_botones_regresion.pack(fill="x", padx=10, pady=(0, 10))
+
+        ttk.Button(
+            frame_botones_regresion,
+            text="Cargar datos extra de ejemplo",
+            command=self._cargar_ejemplo_regresion,
+        ).pack(side="left", padx=(0, 5))
+
+        ttk.Button(
+            frame_botones_regresion,
+            text="Calcular regresión lineal",
+            command=self._mostrar_resultados_regresion,
+        ).pack(side="left", padx=5)
+
+        ttk.Button(
+            frame_botones_regresion,
+            text="Generar gráficos de regresión",
+            command=self._generar_graficos_regresion,
+        ).pack(side="left", padx=5)
+
         frame_resultados = ttk.LabelFrame(self.root, text="Resultados")
         frame_resultados.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
         self._texto_resultados = ScrolledText(frame_resultados, height=15)
         self._texto_resultados.pack(fill="both", expand=True, padx=10, pady=5)
         self._texto_resultados.configure(state="disabled")
+
+    def _escribir_resultados(self, texto: str) -> None:
+        self._texto_resultados.configure(state="normal")
+        self._texto_resultados.delete("1.0", "end")
+        self._texto_resultados.insert("1.0", texto)
+        self._texto_resultados.configure(state="disabled")
+
+    def _cargar_ejemplo_descriptivo(self) -> None:
+        self._texto_datos.delete("1.0", "end")
+        self._texto_datos.insert("1.0", EJEMPLO_DESCRIPTIVO)
+
+    def _cargar_ejemplo_regresion(self) -> None:
+        self._texto_regresion.delete("1.0", "end")
+        self._texto_regresion.insert("1.0", EJEMPLO_REGRESION)
+        self.resultado_regresion = None
 
     def _procesar_datos_manual(self) -> None:
         try:
@@ -249,6 +432,8 @@ class EstadisticaGUI:
             messagebox.showerror("Datos inválidos", str(exc))
             return
 
+        self.regresion_y = None
+        self.resultado_regresion = None
         self._status_var.set(f"Datos manuales cargados ({len(self.series)} valores).")
         messagebox.showinfo("Datos cargados", "Los datos manuales se han cargado correctamente.")
 
@@ -287,6 +472,8 @@ class EstadisticaGUI:
             messagebox.showerror("Datos insuficientes", str(exc))
             return
 
+        self.regresion_y = None
+        self.resultado_regresion = None
         self._status_var.set(
             f"Datos desde '{Path(ruta).name}' - columna '{columna}' ({len(self.series)} valores)."
         )
@@ -325,10 +512,7 @@ class EstadisticaGUI:
 
         medidas = calcular_medidas(self.series)
         texto = formatear_medidas(medidas)
-        self._texto_resultados.configure(state="normal")
-        self._texto_resultados.delete("1.0", "end")
-        self._texto_resultados.insert("1.0", texto)
-        self._texto_resultados.configure(state="disabled")
+        self._escribir_resultados(texto)
 
     def _generar_graficos(self) -> None:
         if self.series is None:
@@ -338,6 +522,54 @@ class EstadisticaGUI:
             "Mostrando gráficos. Cierre la ventana de gráficos para continuar con la aplicación."
         )
         generar_graficos(self.series)
+
+    def _procesar_datos_extra_regresion(self) -> pd.Series:
+        if self.series is None:
+            raise ValueError("Debe cargar primero los datos principales antes de calcular la regresión.")
+
+        texto = self._texto_regresion.get("1.0", "end").strip()
+        regresion_y = parsear_datos_regresion(texto)
+
+        if len(regresion_y) != len(self.series):
+            raise ValueError(
+                "La cantidad de datos extra debe coincidir con la cantidad de datos originales cargados."
+            )
+
+        if np.allclose(self.series.to_numpy(dtype="float64"), self.series.iloc[0]):
+            raise ValueError("No es posible calcular la regresión porque todos los valores de X son iguales.")
+
+        return regresion_y
+
+    def _calcular_regresion_desde_interfaz(self) -> bool:
+        try:
+            self.regresion_y = self._procesar_datos_extra_regresion()
+            self.resultado_regresion = calcular_regresion_lineal(self.series, self.regresion_y)
+        except ValueError as exc:
+            titulo = "Sin datos principales" if self.series is None else "Regresión inválida"
+            messagebox.showwarning(titulo, str(exc))
+            return False
+        return True
+
+    def _mostrar_resultados_regresion(self) -> None:
+        if not self._calcular_regresion_desde_interfaz():
+            return
+
+        texto = formatear_regresion(self.resultado_regresion)
+        self._escribir_resultados(texto)
+
+    def _generar_graficos_regresion(self) -> None:
+        if not self._calcular_regresion_desde_interfaz():
+            return
+
+        self._status_var.set(
+            "Mostrando gráficos de regresión. Cierre la ventana de gráficos para continuar."
+        )
+        generar_graficos_regresion(
+            self.series,
+            self.regresion_y,
+            self.resultado_regresion["y_pred"],
+            self.resultado_regresion["residuos"],
+        )
 
 
 if __name__ == "__main__":
